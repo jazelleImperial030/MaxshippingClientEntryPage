@@ -1,0 +1,512 @@
+<!DOCTYPE html> 
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client Management Page</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+    <style>
+        body {
+            display: flex;
+            min-height: 100vh;
+            flex-direction: column;
+            background-color: #f5f5f5;
+        }
+
+        main {
+            flex: 1 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .input-field {
+            margin-bottom: 20px;
+        }
+
+        .page-title {
+            text-align: center;
+            color: #26a69a;
+            margin-bottom: 30px;
+        }
+
+        #loginMessage {
+            color: #f44336;
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="container">
+            <div id="loginForm" class="card">
+                <h4 class="page-title">Admin Login</h4>
+                <div class="input-field">
+                    <input type="text" id="username" class="validate">
+                    <label for="username">Name</label>
+                </div>
+                <div class="input-field">
+                    <input type="password" id="password" class="validate">
+                    <label for="password">Password</label>
+                </div>
+                <button class="btn waves-effect waves-light" id="loginButton">
+                    Login
+                </button>
+                <p id="loginMessage"></p>
+            </div>
+
+            <div id="clientForm" class="card" style="display:none;">
+                <h4 class="page-title">New Client Entry</h4>
+                <div class="input-field">
+                    <input type="text" id="firstName" class="validate">
+                    <label for="firstName">First Name</label>
+                </div>
+                <div class="input-field">
+                    <input type="text" id="lastName" class="validate">
+                    <label for="lastName">Last Name</label>
+                </div>
+                <div class="input-field">
+                    <input type="email" id="email" class="validate">
+                    <label for="email">Email</label>
+                </div>
+                <div class="input-field">
+                    <input type="tel" id="phone" class="validate">
+                    <label for="phone">Phone</label>
+                </div>
+                <div class="input-field">
+                    <select id="location">
+                        <option value="Roatan" selected>Roatan</option>
+                        <option value="Utila">Utila</option>
+                        <option value="Guanaja">Guanaja</option>
+                        <option value="San Pedro">San Pedro</option>
+                        <option value="Tegus">Tegus</option>
+                    </select>
+                    <label for="location">Location</label>
+                </div>
+                <button class="btn waves-effect waves-light" id="submitClientButton">
+                    Submit
+                </button>
+                <p id="clientMessage" class="success-message"></p>
+                <!-- Loading Indicator -->
+                <div id="loadingIndicator" style="display: none; text-align: center; margin-top: 20px;">
+                    <div class="preloader-wrapper active">
+                        <div class="spinner-layer spinner-blue-only">
+                            <div class="circle-clipper left">
+                                <div class="circle"></div>
+                            </div><div class="gap-patch">
+                                <div class="circle"></div>
+                            </div><div class="circle-clipper right">
+                                <div class="circle"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+        import { getFirestore, doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+
+        document.addEventListener('DOMContentLoaded', function() {
+            M.FormSelect.init(document.querySelectorAll('select'));
+            // Initialize Modals
+            M.Modal.init(document.querySelectorAll('.modal'));
+        });
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBnGGxrdy_fak0q52JCFCw6jfn-oMrUi1k",
+            authDomain: "max-inventory-scanner-b0b53.firebaseapp.com",
+            projectId: "max-inventory-scanner-b0b53",
+            storageBucket: "max-inventory-scanner-b0b53.appspot.com",
+            messagingSenderId: "2957698276",
+            appId: "1:2957698276:web:289a8205a33a0f62ca38f1",
+            measurementId: "G-2YE2KVQWCW"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        function getDiscountCode(location) {
+            const discountCodes = {
+                'Utila': 'U',
+                'San Pedro': 'S',
+                'Tegus': 'T',
+                'Guanaja': 'G'
+            };
+            return discountCodes[location] || null;
+        }
+
+        async function handleLogin(username, password) {
+            try {
+                const usersRef = collection(db, 'User');
+                const q = query(usersRef, where('username', '==', username));
+                const userQuery = await getDocs(q);
+
+                if (!userQuery.empty) {
+                    let validUser = false;
+                    userQuery.forEach((doc) => {
+                        const userData = doc.data();
+                        if (userData.password === password) {
+                            validUser = true;
+                        }
+                    });
+
+                    return validUser;
+                } else {
+                    return false;
+                }
+            } catch (error) {
+                console.error("Error in handleLogin:", error);
+                throw error;
+            }
+        }
+
+        async function findNextClientNumber() {
+            try {
+                const systemVarsRef = doc(db, 'systemVars', 'usefulInformation');
+                const systemVarsSnap = await getDoc(systemVarsRef);
+
+                if (systemVarsSnap.exists()) {
+                    const data = systemVarsSnap.data();
+                    
+                    // Convert lastRefId to number and ensure it's valid
+                    let lastRefId = parseInt(data.lastRefId);
+                    if (isNaN(lastRefId)) lastRefId = 3000;
+                    
+                    // Extract the first digit and convert to number
+                    const firstDigit = parseInt(String(lastRefId)[0]);
+                    
+                    // Calculate next thousand
+                    let nextThousand = firstDigit + 1;
+                    if (nextThousand > 9) nextThousand = 3;
+                    if (nextThousand < 3) nextThousand = 3;
+                    
+                    // Get field name for next thousand group
+                    const nextRefField = `lastRefId${nextThousand}`;
+                    
+                    // Get last number in next thousand range, ensuring it's a number
+                    let lastInThousand = parseInt(data[nextRefField]) || nextThousand * 1000;
+                    
+                    // Ensure it's in the correct thousand range
+                    if (Math.floor(lastInThousand / 1000) !== nextThousand) {
+                        lastInThousand = nextThousand * 1000;
+                    }
+                    
+                    // Calculate next number
+                    const nextRefId = lastInThousand + 1;
+                    
+                    // Debug logging
+                    // console.log({
+                    //     currentLastRefId: lastRefId,
+                    //     firstDigit,
+                    //     nextThousand,
+                    //     nextRefField,
+                    //     lastInThousand,
+                    //     nextRefId
+                    // });
+                    
+                    // Verify correct range
+                    const nextRefIdThousand = Math.floor(nextRefId / 1000);
+                    if (nextRefIdThousand !== nextThousand) {
+                        console.error('ID Generation Debug:', {
+                            nextRefId,
+                            nextRefIdThousand,
+                            nextThousand,
+                            lastInThousand
+                        });
+                        throw new Error(`Invalid ID generated: ${nextRefId} not in ${nextThousand}000 range`);
+                    }
+                    
+                    // Update Firebase
+                    await updateDoc(systemVarsRef, {
+                        [nextRefField]: nextRefId,
+                        lastRefId: nextRefId
+                    });
+                    
+                    return nextRefId;
+                } else {
+                    throw new Error("SystemVars document does not exist");
+                }
+            } catch (error) {
+                console.error("Error finding next client number:", error);
+                throw error;
+            }
+        }
+        async function addClient(firstName, lastName, email, phone, location, clientMessage) {
+        // Show the loading indicator and disable the submit button
+        document.getElementById('loadingIndicator').style.display = 'block';
+        document.getElementById('submitClientButton').disabled = true;
+        try {
+        // Get the next client number
+        const clientId = await findNextClientNumber();
+
+        // Get discount code based on location
+        const discountCode = getDiscountCode(location);
+
+        // Prepare client data to add to Firestore
+        const clientData = {
+            squareCustomerId: null,
+            birthday: null,
+            city: null,
+            clientID: clientId.toString(), // Convert to string before storing in Firestore
+            clientNote: null,
+            companyName: null,
+            creationSource: "Web Form",
+            discountCode: discountCode,
+            emailAddress: email,
+            emailSubscriptionStatus: null,
+            firstName: firstName,
+            firstVisit: null,
+            instantProfile: "No",
+            lastName: lastName,
+            lastVisit: null,
+            memo: discountCode,
+            name: `${firstName} ${lastName}`,
+            needsAdminReview: false,
+            nickname: lastName,
+            origin: "WebForm",
+            phoneNumber: phone,
+            postalCode: null,
+            referenceId: clientId.toString(), // Convert to string if used for another reference
+            state: null,
+            streetAddress: null,
+            streetAddress2: null,
+            totalSpend: null,
+            transactionCount: null
+        };
+
+        // Send webhook with client data
+        const webhookUrl = 'https://hook.us1.make.com/alpsmmheodla1xpslbktsbqrhb8e1530';
+        // Append referenceId and discountCode to lastName for Square
+        let lastNameForSquare = `${lastName} #${clientId}`;
+        if (discountCode) {
+            lastNameForSquare += ` #${discountCode}`; // Append discountCode if it exists
+        }
+
+        // Prepare the payload with the modified lastName
+        const payload = {
+            clientId: clientId.toString(), // Convert to string for storage
+            firstName: firstName,
+            lastName: lastNameForSquare,   // Use the modified lastName
+            email: email,
+            phone: phone,
+            location: location
+        };
+
+
+        const webhookResponse = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const responseText = await webhookResponse.text();
+        if (!webhookResponse.ok) {
+            clientMessage.style.color = '#f44336';
+            clientMessage.innerText = `Error from webhook: ${responseText}`;
+            throw new Error('Failed to send webhook');
+        }
+
+        // Use the response text directly as the Square Customer ID
+        const squareCustomerId = responseText.trim();
+
+        // Add client to Firestore and get the document reference
+        const clientsRef = collection(db, 'Clients');
+        const clientDocRef = await addDoc(clientsRef, clientData);
+
+        // Update the client document with the document ID and the squareCustomerId
+        await updateDoc(clientDocRef, {
+            clientID: clientDocRef.id,
+            squareCustomerId: squareCustomerId
+        });
+
+        clientMessage.style.color = '#4CAF50';
+        clientMessage.innerText = `Client added successfully! Client ID: ${clientId}`;
+        document.getElementById('firstName').value = '';
+        document.getElementById('lastName').value = '';
+        document.getElementById('email').value = '';
+        document.getElementById('phone').value = '';
+        M.updateTextFields();
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('submitClientButton').disabled = false;
+        M.updateTextFields();
+
+    } catch (error) {
+        console.error("Error adding client:", error);
+        clientMessage.style.color = '#f44336';
+        clientMessage.innerText = 'Error adding client. Please try again.';
+          // Hide the loading indicator and enable the submit button
+        document.getElementById('loadingIndicator').style.display = 'none';
+        document.getElementById('submitClientButton').disabled = false;
+    }
+}
+
+
+        document.getElementById('loginButton').addEventListener('click', async () => {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const loginMessage = document.getElementById('loginMessage');
+
+            if (!username || !password) {
+                loginMessage.innerText = 'Please enter both username and password';
+                return;
+            }
+
+            try {
+                const isValidUser = await handleLogin(username, password);
+                if (isValidUser) {
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('clientForm').style.display = 'block';
+                } else {
+                    loginMessage.innerText = 'Invalid credentials. Please try again.';
+                }
+            } catch (error) {
+                loginMessage.innerText = 'An error occurred. Please try again later.';
+            }
+        });
+
+        document.getElementById('submitClientButton').addEventListener('click', async () => {
+        const firstName = document.getElementById('firstName').value.trim();
+        const lastName = document.getElementById('lastName').value.trim();
+        const email = document.getElementById('email').value.trim();
+        const phone = document.getElementById('phone').value.trim();
+        const location = document.getElementById('location').value;
+        const clientMessage = document.getElementById('clientMessage');
+
+        if (!firstName || !lastName || !email || !phone) {
+            clientMessage.style.color = '#f44336';
+            clientMessage.innerText = 'Please fill in all required fields.';
+            return;
+        }
+
+        try {
+            // Check for duplicates by lastName
+            const clientsRef = collection(db, 'Clients');
+            const q = query(clientsRef, where('lastName', '==', lastName));
+            const querySnapshot = await getDocs(q);
+
+            if (!querySnapshot.empty) {
+                // Collect and sort the data by firstName
+                const clients = [];
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    clients.push({
+                        firstName: data.firstName || '',
+                        lastName: data.lastName || '',
+                        referenceId: data.referenceId || ''
+                    });
+                });
+
+                // Sort the clients array alphabetically by firstName
+                clients.sort((a, b) => a.firstName.localeCompare(b.firstName));
+
+                // Populate the modal table
+                const duplicateTableBody = document.getElementById('duplicateTableBody');
+                duplicateTableBody.innerHTML = ''; // Clear existing rows
+                clients.forEach((client) => {
+                    const row = document.createElement('tr');
+
+                    const firstNameCell = document.createElement('td');
+                    firstNameCell.textContent = client.firstName;
+                    row.appendChild(firstNameCell);
+
+                    const lastNameCell = document.createElement('td');
+                    lastNameCell.textContent = client.lastName;
+                    row.appendChild(lastNameCell);
+
+                    const referenceIdCell = document.createElement('td');
+                    referenceIdCell.textContent = client.referenceId;
+                    row.appendChild(referenceIdCell);
+
+                    duplicateTableBody.appendChild(row);
+                });
+
+                // Show the modal
+                const duplicateModalElem = document.getElementById('duplicateModal');
+                const duplicateModalInstance = M.Modal.getInstance(duplicateModalElem);
+                duplicateModalInstance.open();
+
+                // Handle user's decision
+                document.getElementById('proceedAddClient').onclick = async () => {
+                    duplicateModalInstance.close();
+                    await addClient(
+                        firstName,
+                        lastName,
+                        email,
+                        phone,
+                        location,
+                        clientMessage
+                    );
+                };
+
+                document.getElementById('cancelAddClient').onclick = () => {
+                    duplicateModalInstance.close();
+                    clientMessage.style.color = '#f44336';
+                    clientMessage.innerText = 'Client addition cancelled.';
+                };
+            } else {
+                // No duplicates, proceed as normal
+                await addClient(
+                    firstName,
+                    lastName,
+                    email,
+                    phone,
+                    location,
+                    clientMessage
+                );
+            }
+        } catch (error) {
+            console.error("Error processing client:", error);
+            clientMessage.style.color = '#f44336';
+            clientMessage.innerText = 'Error processing client. Please try again.';
+        }
+    });
+
+
+    </script>
+     <!-- Duplicate Clients Modal -->
+<div id="duplicateModal" class="modal" style="max-height: 80vh; overflow-y: auto;">
+    <div class="modal-content">
+        <h4>Customers with same last name found:</h4>
+        <table class="striped">
+            <thead>
+                <tr>
+                    <th>FirstName</th>
+                    <th>LastName</th>
+                    <th>ReferenceId</th>
+                </tr>
+            </thead>
+            <tbody id="duplicateTableBody">
+                <!-- Rows will be added here dynamically -->
+            </tbody>
+        </table>
+        <p>&nbsp;</p>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <p style="margin: 0;">Do you wish to proceed adding this new client?</p>
+            <div>
+                <a href="#!" class="modal-close waves-effect waves-red btn-flat" id="cancelAddClient">No</a>
+                <a href="#!" class="modal-close waves-effect waves-green btn-flat" id="proceedAddClient">Yes</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+  
+</body>
+</html>
